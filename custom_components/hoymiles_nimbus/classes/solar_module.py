@@ -21,8 +21,13 @@ class SolarModule:
 
     def set_data(self, data, times):
         if len(data) != len(times):
-            _LOGGER.warning("Data length %d does not match times length %d for module ID %s", len(data), len(times), self.id)
-            return
+            _LOGGER.warning("Data length %d does not match times length %d for module ID %s - extending arrays", len(data), len(times), self.id)
+            # Extend shorter array to match longer one
+            max_len = max(len(data), len(times))
+            if len(data) < max_len:
+                data = list(data) + [0] * (max_len - len(data))  # Pad with 0 power values
+            if len(times) < max_len:
+                times = list(times) + [times[-1]] * (max_len - len(times))  # Pad with last timestamp
         
         self.data_points = []  # Clear existing data points
         for time, value in zip(times, data):

@@ -94,18 +94,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        super().__init__()
+        self._config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        config_entry = self._config_entry
         """Manage the options."""
         if user_input is not None:
             try:
                 await validate_input(self.hass, user_input)
                 # Update the config entry with new data
                 self.hass.config_entries.async_update_entry(
-                    self.config_entry, data=user_input
+                    config_entry, data=user_input
                 )
                 return self.async_create_entry(title="", data={})
             except CannotConnect:
@@ -119,7 +121,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             errors = {}
 
         # Pre-fill the form with existing values
-        current_data = self.config_entry.data
+        current_data = config_entry.data
         options_schema = vol.Schema({
             vol.Required("username", default=current_data.get("username", "")): str,
             vol.Required("password", default=current_data.get("password", "")): str,
