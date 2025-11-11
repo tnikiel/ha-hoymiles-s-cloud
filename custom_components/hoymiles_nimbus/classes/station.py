@@ -25,6 +25,15 @@ class Station:
 
     def set_data(self, data):
         tree = data.get_compact()  # Store the day's data for the station
+        
+        # Debug: Log full API response structure
+        _LOGGER.debug("Full API response for station %s: %s", self.station_id, tree)
+        
+        # Handle completely empty responses
+        if not tree or len(tree) < 2:
+            _LOGGER.debug("Empty or invalid API response for station ID %s: %s", self.station_id, tree)
+            return
+        
         id = tree[0]
         date = tree[1]
 
@@ -33,7 +42,7 @@ class Station:
             return
         
         if len(tree) < 3:
-            _LOGGER.warning("Data format for station ID %s is unexpected: %s", self.station_id, tree)
+            _LOGGER.debug("No microinverter data for station ID %s (likely offline): %s", self.station_id, tree)
             return
 
         for micro_data in tree[2:]:

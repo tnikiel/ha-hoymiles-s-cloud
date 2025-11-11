@@ -7,7 +7,8 @@
         "data": {
           "username": "Username",
           "password": "Password", 
-          "base_url": "Base URL"
+          "base_url": "Base URL",
+          "enable_individual_panels": "Enable individual panel monitoring"
         }
       }
     },
@@ -28,7 +29,8 @@
         "data": {
           "username": "Username",
           "password": "Password",
-          "base_url": "Base URL"
+          "base_url": "Base URL",
+          "enable_individual_panels": "Enable individual panel monitoring"
         }
       }
     },

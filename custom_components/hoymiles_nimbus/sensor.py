@@ -15,20 +15,25 @@ _LOGGER = logging.getLogger(__name__)
 class HoymilesSystemCoordinator:
     """Coordinator to manage system data updates for all module sensors."""
     
-    def __init__(self, hass, client, initial_system):
+    def __init__(self, hass, client, initial_system, enable_individual_panels=True):
         self._hass = hass
         self._client = client
         self._system = initial_system
         self._last_update = None
+        self._enable_individual_panels = enable_individual_panels
         
     async def get_system(self):
         """Get the current system data, updating if needed."""
         import datetime
         now = datetime.datetime.now()
         
-        # Update every 30 seconds to avoid too frequent API calls
+        # Skip API calls if individual panels are disabled
+        if not self._enable_individual_panels:
+            return self._system
+        
+        # Update every 300 seconds (5 minutes) to reduce API calls
         if (self._last_update is None or 
-            (now - self._last_update).total_seconds() > 30):
+            (now - self._last_update).total_seconds() > 300):
             
             self._system = await self._hass.async_add_executor_job(self._client.map_system)
             await self._hass.async_add_executor_job(self._client.fill_system_data, self._system)
@@ -65,7 +70,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     entities = []
     
     # Create a shared system coordinator for all module sensors
-    system_coordinator = HoymilesSystemCoordinator(hass, client, system)
+    enable_individual_panels = config_entry.data.get("enable_individual_panels", True)
+    system_coordinator = HoymilesSystemCoordinator(hass, client, system, enable_individual_panels)
     
     for station in stations:
         station_name = station.get('name', 'Unknown')
@@ -79,6 +85,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         entities.append(HoymilesStationRatioSensor(client, name, sid, device_info))
 
     # Add individual solar module sensors
+    enable_individual_panels = config_entry.data.get("enable_individual_panels", True)
     for station in system:
         station_name = station.name
         sid = station.station_id
@@ -95,6 +102,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 entities.append(HoymilesSolarModulePowerSensor(system_coordinator, module_name, station.station_id, module, module_device_info))
                 entities.append(HoymilesSolarModuleVoltageSensor(system_coordinator, module_name, station.station_id, module, module_device_info))
                 entities.append(HoymilesSolarModuleCurrentSensor(system_coordinator, module_name, station.station_id, module, module_device_info))
+    
+    if not enable_individual_panels:
+        _LOGGER.info("Individual panel API updates disabled - sensors will show last known values")
 
     _LOGGER.warning("Created %d sensors for Hoymiles devices", len(entities))
     async_add_entities(entities)
@@ -121,7 +131,11 @@ class HoymilesStationPowerSensor(SensorEntity):
         # Fetch the current power data from the Hoymiles S-Cloud
         data = await self.hass.async_add_executor_job(self._client.count_station_real_data, self._sid)
         # _LOGGER.debug(f"Received power data for station {self._sid}: {data}")
-        val = data.get("data", {}).get("real_power", 0)
+        if isinstance(data, dict):
+            val = data.get("data", {}).get("real_power", 0)
+        else:
+            _LOGGER.warning(f"Unexpected data type for station {self._sid}: {type(data)} - {data}")
+            val = 0
         if val is None:
             _LOGGER.warning(f"Received None value for power data for station {self._sid}")
             self._state = 0
@@ -149,7 +163,11 @@ class HoymilesStationEnergySensor(SensorEntity):
     async def async_update(self):
         data = await self.hass.async_add_executor_job(self._client.count_station_real_data, self._sid)
         # _LOGGER.debug(f"Received energy data for station {self._sid}: {data}")
-        val = data.get("data", {}).get("today_eq", 0)
+        if isinstance(data, dict):
+            val = data.get("data", {}).get("today_eq", 0)
+        else:
+            _LOGGER.warning(f"Unexpected data type for station {self._sid}: {type(data)} - {data}")
+            val = 0
         if val is None:
             _LOGGER.warning(f"Received None value for energy data for station {self._sid}")
             self._state = 0

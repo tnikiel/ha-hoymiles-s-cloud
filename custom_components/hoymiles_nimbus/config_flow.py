@@ -29,6 +29,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema({
     vol.Required("username"): str,
     vol.Required("password"): str,
     vol.Optional("base_url", default="https://neapi.hoymiles.com/"): str,
+    vol.Optional("enable_individual_panels", default=True): bool,
 })
 
 
@@ -126,6 +127,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Required("username", default=current_data.get("username", "")): str,
             vol.Required("password", default=current_data.get("password", "")): str,
             vol.Optional("base_url", default=current_data.get("base_url", "https://neapi.hoymiles.com/")): str,
+            vol.Optional("enable_individual_panels", default=current_data.get("enable_individual_panels", True)): bool,
         })
 
         return self.async_show_form(

@@ -100,7 +100,7 @@ class HoymilesMicroInverterLevel(NumberEntity):
 
         station = await self.hass.async_add_executor_job(self._client.findStation, self._sid)
         if not station:
-            _LOGGER.warning(f"[numbers] Station with SID {self._sid} not found")
+            _LOGGER.debug(f"[numbers] Station with SID {self._sid} not found")
             return
         
         _LOGGER.debug(f"[numbers] Station data: {station}")
