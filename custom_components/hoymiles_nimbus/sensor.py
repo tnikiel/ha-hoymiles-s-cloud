@@ -1,7 +1,7 @@
 # custom_components/hoymiles_cloud/sensor.py
 
 import logging
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.const import UnitOfPower, UnitOfEnergy, UnitOfElectricPotential, UnitOfElectricCurrent
 
 from .hoymiles_client import HoymilesClient
@@ -75,6 +75,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
         entities.append(HoymilesStationPowerSensor(client, name, sid, device_info))
         entities.append(HoymilesStationEnergySensor(client, name, sid, device_info))
+        entities.append(HoymilesStationTotalEnergySensor(client, name, sid, device_info))
         entities.append(HoymilesStationRatioSensor(client, name, sid, device_info))
 
     # Add individual solar module sensors
@@ -107,6 +108,7 @@ class HoymilesStationPowerSensor(SensorEntity):
         self._attr_unique_id = f"hoymiles_nimbus_{sid}_power"
         self._attr_device_class = "power"
         self._attr_device_info = device_info
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._state = None
 
     @property
@@ -155,6 +157,37 @@ class HoymilesStationEnergySensor(SensorEntity):
             # _LOGGER.debug(f" Daily energy for station {self._sid}: {val}")
             # Convert to kWh
             # Assuming the value is in Wh, convert to kWh
+            self._state = float(val) / 1000
+
+class HoymilesStationTotalEnergySensor(SensorEntity):
+    """Cumulative total energy sensor from lifetime production."""
+    
+    def __init__(self, client, name, sid, device_info):
+        self._client = client
+        self._sid = sid
+        self._attr_name = f"{name} Total Energy"
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_unique_id = f"hoymiles_nimbus_{sid}_total_energy"
+        self._attr_device_class = "energy"
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_icon = "mdi:solar-power"
+        self._attr_device_info = device_info
+        self._state = None
+
+    @property
+    def native_value(self):
+        return self._state
+
+    async def async_update(self):
+        """Update the total energy from the API."""
+        data = await self.hass.async_add_executor_job(self._client.count_station_real_data, self._sid)
+        val = data.get("data", {}).get("total_eq", 0)
+        
+        if val is None:
+            _LOGGER.warning(f"Received None value for total energy data for station {self._sid}")
+            self._state = 0
+        else:
+            # Convert to kWh (assuming the value is in Wh like today_eq)
             self._state = float(val) / 1000
 
 class HoymilesStationRatioSensor(SensorEntity):

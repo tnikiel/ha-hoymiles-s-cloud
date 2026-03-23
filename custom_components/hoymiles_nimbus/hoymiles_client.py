@@ -53,6 +53,7 @@ class HoymilesClient:
             "select_all_arrays": "pvm/api/0/dev/array_v3/select_all",
             "down_module_day_data": "pvm-data/api/0/module/data/down_module_day_data",
             "down_station_day_data": "pvm-data/api/0/station/down_station_day_data",
+            "select_device_of_tree": "pvm/api/0/station/select_device_of_tree",
         }
         
         self.token = None
@@ -263,6 +264,44 @@ class HoymilesClient:
         response = self._post_request(self.uris['down_module_day_data'], payload=payload, response_type='protobuf', binary=True)
         return response
 
+    @cached(cache=TTLCache(maxsize=100, ttl=300))
+    def select_device_of_tree(self, station_id):
+        """Get device tree for a station including DTU and microinverters."""
+        payload = {
+            "id": station_id,
+        }
+        response = self._post_request(self.uris['select_device_of_tree'], payload=payload)
+        return response.get('data', [])
+
+    def parse_dtu_info(self, tree_data):
+        """Parse DTU information from select_device_of_tree response.
+        
+        Returns a list of DTU info dictionaries with:
+        - id: DTU ID
+        - sn: Serial number
+        - model_no: Model name
+        - connect: Connection status
+        - soft_ver: Software version
+        - hard_ver: Hardware version
+        - microinverters: List of child microinverter IDs
+        """
+        dtu_list = []
+        
+        for device in tree_data:
+            if device.get('type') == 1:  # Type 1 appears to be DTU
+                dtu_info = {
+                    'id': device.get('id'),
+                    'sn': device.get('sn'),
+                    'model_no': device.get('model_no'),
+                    'connect': device.get('warn_data', {}).get('connect', False),
+                    'soft_ver': device.get('soft_ver'),
+                    'hard_ver': device.get('hard_ver'),
+                    'microinverters': [child.get('id') for child in device.get('children', [])]
+                }
+                dtu_list.append(dtu_info)
+        
+        return dtu_list
+
     # ============================================================================
     # CONTROL OPERATIONS
     # ============================================================================
@@ -305,6 +344,15 @@ class HoymilesClient:
         
         for station_data in stations:
             station = Station(station_data.get("id"), station_data.get("name"))
+            
+            # Fetch DTU information for the station
+            try:
+                tree_data = self.select_device_of_tree(station.station_id)
+                dtus = self.parse_dtu_info(tree_data)
+                station.set_dtus(dtus)
+                _LOGGER.debug(f"Found {len(dtus)} DTU(s) for station {station.station_id}")
+            except Exception as e:
+                _LOGGER.warning(f"Could not fetch DTU info for station {station.station_id}: {e}")
             
             # Fetch microinverters for the station
             microinverters = self.select_by_station(station.station_id)

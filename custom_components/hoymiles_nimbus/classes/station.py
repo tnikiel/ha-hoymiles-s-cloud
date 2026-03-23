@@ -8,9 +8,20 @@ class Station:
         self.station_id = station_id
         self.name = name
         self.microinverters = []  # List of Microinverter objects
+        self.dtus = []  # List of DTU info dictionaries
 
     def add_microinverter(self, microinverter):
         self.microinverters.append(microinverter)
+
+    def set_dtus(self, dtus):
+        """Set the list of DTUs for this station."""
+        self.dtus = dtus
+
+    def all_dtus_online(self):
+        """Check if all DTUs are connected/online."""
+        if not self.dtus:
+            return False  # No DTUs means we can't determine status
+        return all(dtu.get('connect', False) for dtu in self.dtus)
 
     def set_data(self, data):
         tree = data.get_compact()  # Store the day's data for the station
