@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - fix/token-expiry-reauth
+
+### Fixed
+- **Token expiry re-authentication** — Detect API-level auth errors (status 100/401) and automatically retry with a fresh token, preventing stale sessions from breaking data updates
+- **Parser type error** — Fixed `decode_data_point` to handle mixed data types (strings vs integers) returned by the API, resolving crashes during solar module sensor setup
+
+### Changed
+- **Per-instance caching** — Replaced shared module-level `TTLCache` decorators with per-instance caches (`_cache_station_data` 5min, `_cache_station_list` and `_cache_system_map` 1h) to prevent stale/error responses being served indefinitely
+- **Cache-bypassing re-auth** — Added `_relogin()` method that clears all caches and forces a fresh authentication when needed
+- **Reliability improvements** — Better error handling, panel status checking, and token refresh logic
+
+### Added
+- **Solar module sensors** — Per-panel monitoring with power, voltage, and current sensors
+- **Configuration flow** — UI-based setup and configuration for the integration
+
+---
+
 ## [0.3.0] - 2026-03-23
 
 ### Added

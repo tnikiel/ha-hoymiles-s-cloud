@@ -3,7 +3,7 @@ import requests
 import yaml
 import logging
 import hashlib
-from cachetools import TTLCache, cached
+from cachetools import TTLCache
 
 # Handle imports for both standalone and Home Assistant contexts
 try:
@@ -57,14 +57,16 @@ class HoymilesClient:
         }
         
         self.token = None
-        self.cache = TTLCache(maxsize=100, ttl=300)
+        self._cache_station_data = TTLCache(maxsize=100, ttl=300)
+        self._cache_station_list = TTLCache(maxsize=10, ttl=3600)
+        self._cache_system_map = TTLCache(maxsize=10, ttl=3600)
 
     # ============================================================================
     # HTTP HELPER METHODS
     # ============================================================================
 
 
-    def _post_request(self, uri, payload=None, headers=None, use_auth=True, binary=False, response_type='json'):
+    def _post_request(self, uri, payload=None, headers=None, use_auth=True, binary=False, response_type='json', _retry=True):
         """Helper method to make POST requests."""
         url = f"{self.base_url}{uri}"
         if headers is None:
@@ -77,36 +79,33 @@ class HoymilesClient:
 
         _LOGGER.debug(f"POST Request URL: {url}")
         _LOGGER.debug(f"POST Request Payload: {payload}")
-        _LOGGER.debug(f"POST Request Headers: {headers}")
         
         response = requests.post(url, json=payload, headers=headers)
         
         try:
             _LOGGER.debug(f"Response Status Code: {response.status_code}")
-            _LOGGER.debug(f"Response Headers: {response.headers}")
             response.raise_for_status()
             
-            # Attempt to parse the response as JSON
-            try:
-                if response_type == 'protobuf' and binary:
-                    parser = ProtobufParser(response.content)
-                    _LOGGER.debug("API Response: %s - Protobuf data received", response.status_code)
-                    return parser
-                response_data = response.json()
-                logging.debug(f"Response JSON: {response_data}")
-                _LOGGER.debug("API Response: %s - Success", response.status_code)
-                return response_data
-            except ValueError:
-                logging.error("Failed to parse response as JSON")
-                _LOGGER.debug("API Response: %s - Failed to parse JSON", response.status_code)
-                return None
+            if response_type == 'protobuf' and binary:
+                return ProtobufParser(response.content)
+            
+            response_data = response.json()
+            
+            # Detect API-level auth errors (token expired) — Hoymiles returns 200 with error status
+            if isinstance(response_data, dict) and _retry:
+                status = response_data.get("status") or response_data.get("code")
+                if status in ("100", "401", 100, 401):
+                    _LOGGER.warning("API returned auth error (status %s), re-authenticating", status)
+                    self.token = None
+                    self._relogin()
+                    return self._post_request(uri, payload=payload, headers=None, use_auth=use_auth, binary=binary, response_type=response_type, _retry=False)
+            
+            return response_data
         except requests.exceptions.RequestException as e:
-            logging.error(f"Request failed: {e}")
-            _LOGGER.warning("API Response: Request failed - %s", str(e))
+            _LOGGER.error(f"Request failed: {e}")
             raise
         except Exception as e:
-            logging.error(f"An unexpected error occurred: {e}")
-            _LOGGER.warning("API Response: Unexpected error - %s", str(e))
+            _LOGGER.error(f"An unexpected error occurred: {e}")
             raise
         
     def _put_request(self, uri, payload=None, headers=None):
@@ -142,37 +141,36 @@ class HoymilesClient:
     # ============================================================================
 
     def get_password_hash(self):
-      password = self.password.encode('utf-8')
-      passwordHash = hashlib.md5(password)
-      return passwordHash.hexdigest()
+        password = self.password.encode('utf-8')
+        return hashlib.md5(password).hexdigest()
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
-    def get_token(self,username, password):
-      payload = {
-          "user_name": username,
-          "password": password,
-      }
-      _LOGGER.debug(f"Payload for get_token: {payload}")
-      return self._post_request(self.uris['login'], payload=payload, use_auth=False)
-    
+    def _relogin(self):
+        """Force a fresh login, bypassing any cache."""
+        _LOGGER.debug("Re-authenticating with Hoymiles S-Cloud")
+        payload = {
+            "user_name": self.username,
+            "password": self.get_password_hash(),
+        }
+        response_data = self._post_request(self.uris['login'], payload=payload, use_auth=False)
+        if response_data and "data" in response_data and "token" in response_data["data"]:
+            self.token = response_data["data"]["token"]
+            # Invalidate all data caches so next calls fetch fresh data with new token
+            self._cache_station_data.clear()
+            self._cache_station_list.clear()
+            self._cache_system_map.clear()
+        else:
+            raise Exception("Login failed: Token not found in response")
 
     def login(self):
-      """Authenticate with Hoymiles S-Cloud and retrieve a token."""
-      _LOGGER.warning("Logging into Hoymiles S-Cloud for user: %s", self.username)
-      response_data = self.get_token(username=self.username, password=self.get_password_hash())
-      if response_data and "data" in response_data and "token" in response_data["data"]:
-          self.token = response_data["data"]["token"]
-          _LOGGER.warning("Successfully authenticated with Hoymiles S-Cloud")
-          return True
-      else:
-          _LOGGER.error("Login failed: Token not found in response")
-          raise Exception("Login failed: Token not found in response")
+        """Authenticate with Hoymiles S-Cloud and retrieve a token."""
+        if not self.token:
+            self._relogin()
+        return True
 
     # ============================================================================
     # DATA FETCHING METHODS
     # ============================================================================
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def select_by_station(self, station_id):
         """Select microinverters by station ID."""
         payload = {
@@ -185,7 +183,6 @@ class HoymilesClient:
 
         return response.get("data", {})
     
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def micro_find(self, micro_id, station_id):
         """Find a microinverter by its ID."""
         payload = {
@@ -195,7 +192,6 @@ class HoymilesClient:
         response = self._post_request(self.uris['micro_find'], payload=payload)
         return response.get('data', {})
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def module_details(self, station_id, micro_id, micro_sn, port, time):
         """Retrieve module details by its ID."""
         payload = {
@@ -210,12 +206,10 @@ class HoymilesClient:
         response = self._post_request(self.uris['module_details'], payload=payload)
         return response.get('data', {})
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def get_user_info(self):
         """Retrieve user information from Hoymiles S-Cloud. [UNUSED]"""
         return self._post_request(self.uris['user_info'])
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def select_by_page(self, type):
         uri_map = {
             "station":  "pvm/api/0/station/select_by_page",
@@ -237,16 +231,18 @@ class HoymilesClient:
 
         return response.get("data", {}).get("list", [])
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
-    def count_station_real_data(self,id):
+    def count_station_real_data(self, id):
         """Get the count of station real data."""
         _LOGGER.debug(f"Getting count of station real data for ID: {id}")
-        payload = {
-            "sid": id,
-        }
-        return self._post_request(self.uris['count_station_data'], payload=payload)
+        cache_key = f"station_real_data_{id}"
+        if cache_key in self._cache_station_data:
+            return self._cache_station_data[cache_key]
+        payload = {"sid": id}
+        result = self._post_request(self.uris['count_station_data'], payload=payload)
+        if isinstance(result, dict):
+            self._cache_station_data[cache_key] = result
+        return result
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def findStation(self, sid):
         """Find a station by its ID."""
         payload = {
@@ -264,7 +260,6 @@ class HoymilesClient:
         response = self._post_request(self.uris['down_module_day_data'], payload=payload, response_type='protobuf', binary=True)
         return response
 
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def select_device_of_tree(self, station_id):
         """Get device tree for a station including DTU and microinverters."""
         payload = {
@@ -333,7 +328,6 @@ class HoymilesClient:
     # SYSTEM MAPPING AND DATA PROCESSING
     # ============================================================================
     
-    @cached(cache=TTLCache(maxsize=100, ttl=300))
     def map_system(self):
         """Build a hierarchical system map of stations, microinverters, and modules."""
         stations = self.select_by_page("station")
