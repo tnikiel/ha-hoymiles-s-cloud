@@ -15,7 +15,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **Solar module sensors** — Per-panel monitoring with power, voltage, and current sensors
-- **Configuration flow** — UI-based setup and configuration for the integration
 
 ---
 
